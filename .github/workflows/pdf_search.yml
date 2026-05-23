@@ -1,4 +1,4 @@
-name: PDF Keyword Search and Alert
+name: PDF Multi-Keyword Advanced Search
 
 on:
   workflow_dispatch:
@@ -7,10 +7,18 @@ on:
         description: 'Direct Link to the PDF'
         required: true
         default: 'https://example.com/document.pdf'
-      keyword:
-        description: 'Keyword to search for'
+      keywords:
+        description: 'Keywords to search for (separate with commas)'
         required: true
-        default: 'Decision'
+        default: 'Decision, Budget, Approved'
+      match_mode:
+        description: 'Matching Rule Strategy'
+        required: true
+        default: 'any'
+        type: choice
+        options:
+        - any
+        - all
 
 jobs:
   search-and-notify:
@@ -33,7 +41,8 @@ jobs:
     - name: Run Search Script
       env:
         PDF_URL: ${{ github.event.inputs.pdf_url }}
-        KEYWORD: ${{ github.event.inputs.keyword }}
+        KEYWORDS: ${{ github.event.inputs.keywords }}
+        MATCH_MODE: ${{ github.event.inputs.match_mode }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python search_pdf.py
