@@ -5,9 +5,8 @@ import requests
 from pypdf import PdfReader
 
 # --- CONFIGURATION ---
-# Just put the filename or the relative path to the PDF inside your repository
 PDF_FILE_PATH = "document.pdf" 
-KEYWORDS_TO_TRACK = ["insc", "criminal", "telegram"]
+KEYWORDS_TO_TRACK = ["python", "automation", "telegram"]
 
 # Read sensitive tokens from GitHub Secrets
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -19,7 +18,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 
 def scan_local_pdf(file_path, keywords):
-    """Reads the PDF file locally from the repository folder."""
+    """Reads the PDF file locally and finds matching paragraphs for each keyword."""
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Could not find the file: '{file_path}' in the repository workspace.")
         
@@ -33,28 +32,64 @@ def scan_local_pdf(file_path, keywords):
         if extracted_text:
             full_text += extracted_text + "\n"
             
-    # Count the matches (case-insensitive scan)
-    keyword_counts = {}
-    for keyword in keywords:
-        matches = re.findall(re.escape(keyword), full_text, flags=re.IGNORECASE)
-        keyword_counts[keyword] = len(matches)
+    # Clean up inconsistent spaces or line breaks often caused by PDF extractions
+    # This splits text neatly into paragraphs separated by double line-breaks
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', full_text) if p.strip()]
         
-    return keyword_counts
-
-
-def send_telegram_alert(token, chat_id, counts):
-    """Sends a summary message to your Telegram Bot if keywords are found."""
-    found_keywords = {k: v for k, v in counts.items() if v > 0}
+    keyword_matches = {}
     
-    if not found_keywords:
+    for keyword in keywords:
+        keyword_matches[keyword] = {
+            "count": 0,
+            "paragraphs": []
+        }
+        
+        # Compile a case-insensitive search pattern for the keyword
+        pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+        
+        for para in paragraphs:
+            matches = pattern.findall(para)
+            if matches:
+                keyword_matches[keyword]["count"] += len(matches)
+                # Keep the paragraph, but clean up inner single-newlines so it looks good on Telegram
+                clean_para = re.sub(r'\n+', ' ', para)
+                if clean_para not in keyword_matches[keyword]["paragraphs"]:
+                    keyword_matches[keyword]["paragraphs"].append(clean_para)
+        
+    return keyword_matches
+
+
+def send_telegram_alert(token, chat_id, results):
+    """Sends a summary message along with matching paragraphs to Telegram."""
+    # Filter out keywords that weren't found
+    found_items = {k: v for k, v in results.items() if v["count"] > 0}
+    
+    if not found_items:
         print("No matching keywords found in the document. Skipping Telegram alert.")
         return
 
-    # Construct the alert message
+    # 1. Create the Summary Header
     message = "🔔 **Keyword Alert from GitHub Actions!**\n\n"
-    message += "The following tracked words were discovered:\n"
-    for kw, count in found_keywords.items():
-        message += f"• `{kw}`: found **{count}** time(s)\n"
+    message += "**Matches Found:**\n"
+    for kw, data in found_items.items():
+        message += f"• `{kw}`: found **{data['count']}** time(s)\n"
+    
+    message += "\n" + "─" * 15 + "\n\n"
+    
+    # 2. Append the Surrounding Paragraphs
+    message += "📄 **Surrounding Paragraphs:**\n\n"
+    for kw, data in found_items.items():
+        message += f"🔑 **Keyword: `{kw}`**\n"
+        for i, para in enumerate(data["paragraphs"], 1):
+            # Truncate paragraphs if they are massive so Telegram doesn't hit a character limit
+            if len(para) > 600:
+                para = para[:597] + "..."
+            
+            message += f"_*Paragraph {i}:*_\n> {para}\n\n"
+            
+    # Telegram messages have a strict 4096 character limit
+    if len(message) > 4000:
+        message = message[:3990] + "\n\n...[Message Truncated due to length]"
         
     # Send request to Telegram Bot API
     telegram_url = f"https://api.telegram.org/bot{token}/sendMessage"
