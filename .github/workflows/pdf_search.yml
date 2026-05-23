@@ -1,7 +1,6 @@
 name: PDF Keyword Search and Alert
 
 on:
-  # Allows manual triggers with custom parameters
   workflow_dispatch:
     inputs:
       pdf_url:
@@ -29,7 +28,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pypdf
+        pip install pypdf requests
 
     - name: Run Search Script
       env:
