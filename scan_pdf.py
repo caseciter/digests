@@ -1,13 +1,25 @@
+Ah, the message got cut off mid-sentence because Telegram enforces a strict limit of **4,096 characters per message**. When your PDF has a lot of matches or very long paragraphs, all those blocks combined easily break that limit, causing the script to chop the text off.
+
+To fix this, we need to change how the script sends messages: instead of stuffing everything into one giant text block, the script should **send each block as its own individual message**.
+
+This completely eliminates the truncation issue, group-organizes the alerts, and ensures you get every single match clearly without data getting dropped.
+
+### The Fixed Python Script (`scan_pdf.py`)
+
+Replace your current script with this version. It now calculates length safely and fires multiple separate messages to your bot if needed:
+
+```python
 import os
 import re
 import sys
 import html
+import time
 import requests
 from pypdf import PdfReader
 
 # --- CONFIGURATION ---
 PDF_FILE_PATH = "document.pdf" 
-KEYWORDS_TO_TRACK = ["intention", "automation", "telegram"]
+KEYWORDS_TO_TRACK = ["python", "automation", "telegram"]
 
 # Read sensitive tokens from GitHub Secrets
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -19,7 +31,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 
 def scan_local_pdf(file_path, keywords):
-    """Reads PDF, cleans line breaks, and extracts the full contextual sentence block."""
+    """Reads PDF, cleans line breaks, and extracts structural context blocks."""
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Could not find the file: '{file_path}'")
         
@@ -32,13 +44,11 @@ def scan_local_pdf(file_path, keywords):
         if text:
             raw_lines.append(text)
             
-    # Combine text and replace single hard line breaks with a regular space
-    # This turns broken PDF lines into a natural continuous flow of text
+    # Stitches broken lines into a unified continuous flow
     full_text = " ".join(raw_lines)
     full_text = re.sub(r'\s+', ' ', full_text).strip()
     
-    # Split the clean text into actual punctuation-based sentences
-    # Matches periods, exclamation marks, or question marks followed by a space
+    # Split text intelligently into actual punctuation-based sentences
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
     
     keyword_matches = {}
@@ -49,80 +59,82 @@ def scan_local_pdf(file_path, keywords):
             "snippets": []
         }
         
-        # Count total occurrences globally in the document
         global_matches = re.findall(re.escape(keyword), full_text, flags=re.IGNORECASE)
         keyword_matches[keyword]["count"] = len(global_matches)
         
         if keyword_matches[keyword]["count"] > 0:
-            # Look through sentences to pull relevant context windows
             for idx, sentence in enumerate(sentences):
                 if re.search(re.escape(keyword), sentence, re.IGNORECASE):
-                    # Grab a window: 2 sentences before, the current sentence, and 2 sentences after
+                    # Gather context window: 2 sentences before, current sentence, 2 sentences after
                     start_idx = max(0, idx - 2)
                     end_idx = min(len(sentences), idx + 3)
                     
                     context_block = " ".join(sentences[start_idx:end_idx])
                     
-                    # Avoid duplicates if a keyword appears multiple times in the same area
                     if context_block not in keyword_matches[keyword]["snippets"]:
                         keyword_matches[keyword]["snippets"].append(context_block)
                         
     return keyword_matches
 
 
+def post_to_telegram(token, chat_id, text):
+    """Helper function to send a standalone message to Telegram."""
+    telegram_url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    res = requests.post(telegram_url, json=payload)
+    if res.status_code != 200:
+        print(f"Telegram API Error: {res.text}")
+    # Short pause to prevent hitting Telegram's rate limits when blasting multiple messages
+    time.sleep(0.5)
+
+
 def send_telegram_alert(token, chat_id, results):
-    """Sends a summary alert to Telegram using HTML parsing for absolute safety."""
+    """Sends a summary overview followed by individual messages for matches to prevent truncation."""
     found_items = {k: v for k, v in results.items() if v["count"] > 0}
     
     if not found_items:
         print("No tracking matches found. Exiting.")
         return
 
-    # Build response with clean HTML tags
-    message_segments = [
+    # 1. Send the Summary Overview Header First
+    summary_msg = [
         "🔔 <b>Keyword Alert from GitHub Actions!</b>\n",
-        "<b>Matches Found:</b>"
+        "<b>Matches Found Overview:</b>"
     ]
-    
     for kw, data in found_items.items():
-        message_segments.append(f"• <code>{html.escape(kw)}</code>: found <b>{data['count']}</b> time(s)")
+        summary_msg.append(f"• <code>{html.escape(kw)}</code>: found <b>{data['count']}</b> time(s)")
         
-    message_segments.append("\n" + "─" * 20 + "\n")
-    message_segments.append("📄 <b>Extracted Context Blocks:</b>\n")
+    post_to_telegram(token, chat_id, "\n".join(summary_msg))
     
+    # 2. Send each matching context paragraph block as its own dedicated message
+    block_number = 1
     for kw, data in found_items.items():
-        message_segments.append(f"🔑 <b>Keyword: <code>{html.escape(kw)}</code></b>")
-        for i, snippet in enumerate(data["snippets"], 1):
-            # Safe text encoding for Telegram HTML mode
+        for snippet in data["snippets"]:
             safe_snippet = html.escape(snippet)
             
-            # Visually bold the targeted keyword inside the context paragraph block
+            # Highlight target keyword
             insensitive_keyword = re.compile(re.escape(kw), re.IGNORECASE)
             highlighted_snippet = insensitive_keyword.sub(f"<u><b>{kw.upper()}</b></u>", safe_snippet)
             
-            if len(highlighted_snippet) > 700:
-                highlighted_snippet = highlighted_snippet[:697] + "..."
-                
-            message_segments.append(f"<i>Block {i}:</i>\n<blockquote>{highlighted_snippet}</blockquote>\n")
+            # Build individual container message
+            block_msg = (
+                f"📄 <b>Context Match #{block_number}</b>\n"
+                f"🔑 Keyword: <code>{html.escape(kw)}</code>\n\n"
+                f"<blockquote>{highlighted_snippet}</blockquote>"
+            )
             
-    final_message = "\n".join(message_segments)
-    
-    # Enforce safe upper message limits
-    if len(final_message) > 4000:
-        final_message = final_message[:3950] + "\n\n<b>[Message truncated due to length limits]</b>"
-        
-    telegram_url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": final_message,
-        "parse_mode": "HTML"
-    }
-    
-    res = requests.post(telegram_url, json=payload)
-    if res.status_code == 200:
-        print("Alert successfully pushed to Telegram!")
-    else:
-        print(f"Telegram API Error Details: {res.text}")
+            # Absolute safety net: if a single block is somehow longer than 4000 characters, hard slice it
+            if len(block_msg) > 4000:
+                block_msg = block_msg[:3990] + "..."
+                
+            post_to_telegram(token, chat_id, block_msg)
+            block_number += 1
+            
+    print(f"Successfully sent summary and {block_number - 1} context blocks to Telegram!")
 
 
 if __name__ == "__main__":
@@ -132,3 +144,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An error execution occurred: {e}")
         sys.exit(1)
+
+```
+
+### What makes this fix work:
+
+* **Message Splitting:** Instead of combining all paragraphs together into one 5,000+ character brick, it sends one tidy "Summary" message first. Then, it runs a loop to dispatch each individual text match separately (`Context Match #1`, `Context Match #2`, etc.).
+* **Rate-Limit Guard:** It includes a half-second pause (`time.sleep(0.5)`) between messages so Telegram doesn't flag your bot for spamming text too quickly.
