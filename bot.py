@@ -22,12 +22,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 # Core logic to download and search the PDF
-async def process_pdf_search(update_or_query, context: ContextTypes.DEFAULT_TYPE, pdf_url: str, keyword: str) -> None:
-    # This handles both direct text messages and button clicks smoothly
-    is_callback = hasattr(update_or_query, "message") == False
-    send_message_func = update_or_query.edit_message_text if is_callback else update_or_query.reply_text
-
-    await send_message_func(f"⏳ Downloading and searching for '{keyword}'... Please wait.")
+async def process_pdf_search(update: Update, context: ContextTypes.DEFAULT_TYPE, pdf_url: str, keyword: str, status_msg=None) -> None:
+    # Send a fresh status message if one wasn't passed from the button click
+    if not status_msg:
+        status_msg = await update.message.reply_text(f"⏳ Downloading and searching for '{keyword}'... Please wait.")
+    
     keyword = keyword.lower()
 
     try:
@@ -54,25 +53,15 @@ async def process_pdf_search(update_or_query, context: ContextTypes.DEFAULT_TYPE
             if len(output) > 4000:
                 output = output[:4000] + "\n\n...(truncated due to length limit)"
             
-            # Send message back (handling formatting correctly)
-            if is_callback:
-                await update_or_query.message.reply_text(output, parse_mode="Markdown")
-            else:
-                await update_or_query.reply_text(output, parse_mode="Markdown")
+            # Delete the status message and send the markdown payload cleanly
+            await status_msg.delete()
+            await context.bot.send_message(chat_id=status_msg.chat_id, text=output, parse_mode="Markdown")
         else:
-            final_text = f"🔍 Finished searching. Keyword '{keyword}' not found in the text."
-            if is_callback:
-                await update_or_query.message.reply_text(final_text)
-            else:
-                await update_or_query.reply_text(final_text)
+            await status_msg.edit_text(f"🔍 Finished searching. Keyword '{keyword}' not found in the text.")
 
     except Exception as e:
         logger.error(f"Error processing PDF: {e}")
-        error_text = "❌ Failed to complete the search. Verify the URL is a direct path to a valid PDF."
-        if is_callback:
-            await update_or_query.message.reply_text(error_text)
-        else:
-            await update_or_query.reply_text(error_text)
+        await status_msg.edit_text("❌ Failed to complete the search. Verify the URL is a direct path to a valid PDF.")
 
 # Handle explicitly typed command: /search URL keyword
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -81,23 +70,18 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     pdf_url = context.args[0]
     keyword = " ".join(context.args[1:])
-    await process_pdf_search(update.message, context, pdf_url, keyword)
+    await process_pdf_search(update, context, pdf_url, keyword)
 
 # Handle a raw text link sent without a command
 async def handle_raw_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
     
-    # Basic structural check to see if it looks like a URL
     if text.startswith("http://") or text.startswith("https://"):
-        # Build button matrix dynamically
         keyboard = []
         for kw in DEFAULT_KEYWORDS:
-            # Storing target url and chosen keyword in callback_data payload
             keyboard.append([InlineKeyboardButton(text=kw.upper(), callback_data=f"kw|{kw}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Save the URL temporarily in user data context so we can access it on button click
         context.user_data["current_pdf_url"] = text
         
         await update.message.reply_text(
@@ -110,7 +94,7 @@ async def handle_raw_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # Handle button interactions
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer() # Acknowledge interaction quickly
+    await query.answer()  # Tell Telegram the click was registered immediately
 
     data_parts = query.data.split("|")
     if data_parts[0] == "kw":
@@ -121,8 +105,14 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text("❌ Session expired. Please paste the PDF link again.")
             return
 
-        # Execute search
-        await process_pdf_search(query, context, pdf_url, selected_keyword)
+        # CRITICAL FIX: Erase the buttons and alter text to state progress to avoid UI lock
+        status_msg = await query.edit_message_text(
+            text=f"⏳ Downloading and searching for '{selected_keyword}'... Please wait.", 
+            reply_markup=None  # This explicitly deletes the keyboard block
+        )
+
+        # Execute search passing the clean status message handle
+        await process_pdf_search(update, context, pdf_url, selected_keyword, status_msg=status_msg)
 
 def main() -> None:
     import os
@@ -133,17 +123,12 @@ def main() -> None:
 
     application = Application.builder().token(TOKEN).build()
 
-    # Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("search", search_command))
-    
-    # Catch-all text messages that look like URLs
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_raw_link))
-    
-    # Handle button inputs
+    application.add_handler(filters.TEXT & ~filters.COMMAND, handle_raw_link))
     application.add_handler(CallbackQueryHandler(handle_button_click))
 
-    logger.info("Bot is polling with instant keyword menus...")
+    logger.info("Bot is polling with fixed keyboard execution...")
     application.run_polling()
 
 if __name__ == "__main__":
