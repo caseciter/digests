@@ -1,0 +1,40 @@
+name: PDF Keyword Search and Alert
+
+on:
+  # Allows manual triggers with custom parameters
+  workflow_dispatch:
+    inputs:
+      pdf_url:
+        description: 'Direct Link to the PDF'
+        required: true
+        default: 'https://example.com/document.pdf'
+      keyword:
+        description: 'Keyword to search for'
+        required: true
+        default: 'Decision'
+
+jobs:
+  search-and-notify:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-node-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip upgrade pip
+        pip install pypdf
+
+    - name: Run Search Script
+      env:
+        PDF_URL: ${{ github.event.inputs.pdf_url }}
+        KEYWORD: ${{ github.event.inputs.keyword }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python search_pdf.py
