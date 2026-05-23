@@ -1,14 +1,23 @@
 import os
 import re
+import html
 import urllib.request
 import urllib.parse
 import requests
 import pypdf
 
 def _post_to_telegram(token, chat_id, text):
-    """Helper tool to make the actual network request to Telegram."""
+    """Helper tool to send HTML-formatted messages to Telegram."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = urllib.parse.urlencode({'chat_id': chat_id, 'text': text}).encode('utf-8')
+    
+    # Payload configured for HTML rendering
+    payload = {
+        'chat_id': chat_id, 
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    
+    data = urllib.parse.urlencode(payload).encode('utf-8')
     try:
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req) as response:
@@ -18,42 +27,49 @@ def _post_to_telegram(token, chat_id, text):
         return None
 
 def send_summary_and_details(token, chat_id, pdf_url, match_mode, keywords_list, matches):
-    """
-    Sends an initial summary breakdown of matches, followed by the individual 
-    paragraphs split cleanly across consecutive messages.
-    """
-    # 1. Generate and Send the Summary Card
+    """Sends a summary card followed by beautifully quoted detailed paragraphs."""
     keywords_display = ", ".join(keywords_list)
+    
+    # 1. Generate and Send the Summary Card (Using basic HTML tags instead of Markdown)
     summary_lines = [
-        f"📊 *PDF SEARCH SUMMARY*",
-        f"🌐 *URL:* {pdf_url}",
-        f"⚙️ *Mode:* {match_mode.upper()}",
-        f"🎯 *Keywords:* `{keywords_display}`",
-        f"📈 *Total Matches Found:* {len(matches)}",
-        f"\n🔍 *Match Breakdown by Page:*"
+        f"📋 <b>Context Matches Summary</b>",
+        f"🌐 <b>URL:</b> {pdf_url}",
+        f"⚙️ <b>Strategy:</b> {match_mode.upper()}",
+        f"🔑 <b>Keywords:</b> <code>{html.escape(keywords_display)}</code>",
+        f"📈 <b>Total Matches Found:</b> {len(matches)}",
+        f"\n🔍 <b>Match Breakdown by Page:</b>"
     ]
     
     for m in matches:
-        summary_lines.append(f"• Page {m['page']} (Matches: {', '.join(m['triggered'])})")
+        triggered_escaped = html.escape(", ".join(m['triggered']))
+        summary_lines.append(f"• Page {m['page']} (Keywords: {triggered_escaped})")
         
     summary_text = "\n".join(summary_lines)
     print("Sending search summary card...")
     _post_to_telegram(token, chat_id, summary_text)
     
-    # 2. Package and Send Paragraph Details Consecutively
-    current_message = "📝 *DETAILED MATCHING PARAGRAPHS:*"
+    # 2. Package and Send Paragraph Details Consecutively inside Blockquotes
+    current_message = "📝 <b>DETAILED MATCHING PARAGRAPHS:</b>"
     message_count = 1
     
-    for m in matches:
-        block = f"\n\n---\n📄 *[Page {m['page']} | Matches: {', '.join(m['triggered'])}]*\n{m['text']}"
+    for idx, m in enumerate(matches, start=1):
+        escaped_text = html.escape(m['text'])
+        escaped_keywords = html.escape(", ".join(m['triggered']))
         
-        # Split text safely if it risks exceeding Telegram's 4096 character limit
+        # Build the structured, quoted block using <blockquote> tags
+        block = (
+            f"\n\n📄 <b>Context Match #{idx}</b>\n"
+            f"🔑 Keyword: {escaped_keywords}\n"
+            f"<blockquote>{escaped_text}</blockquote>"
+        )
+        
+        # Split chunks cleanly if they step over Telegram's character limits
         if len(current_message) + len(block) > 4000:
-            print(f"Sending detailed chunk #{message_count}...")
+            print(f"Sending detailed block chunk #{message_count}...")
             _post_to_telegram(token, chat_id, current_message)
             
             message_count += 1
-            current_message = f"📦 *Detailed Paragraphs (Part {message_count}):*{block}"
+            current_message = f"📦 <b>Detailed Paragraphs (Part {message_count}):</b>{block}"
         else:
             current_message += block
             
@@ -79,6 +95,7 @@ def extract_paragraphs_with_keywords(pdf_path, keywords_list, match_mode):
                 if not cleaned_para:
                     continue
                 
+                # Case-insensitive lookup tracking matches
                 caught_keywords = [kw for kw in keywords_list if kw.lower() in cleaned_para.lower()]
                 
                 should_append = False
@@ -140,14 +157,14 @@ def main():
     matches = extract_paragraphs_with_keywords(local_pdf, keywords_list, match_mode)
     
     if matches:
-        print(f"Found {len(matches)} match(es). Triggering Telegram sequence...")
+        print(f"Found {len(matches)} match(es). Dispatching UI layout to Telegram...")
         send_summary_and_details(tg_token, tg_chat_id, pdf_url, match_mode, keywords_list, matches)
     else:
         print("No matching paragraphs found based on your keyword criteria.")
         _post_to_telegram(
             tg_token, 
             tg_chat_id, 
-            f"🔍 *PDF Search Completed*\nNo matches found for `{', '.join(keywords_list)}` inside:\n{pdf_url}"
+            f"🔍 <b>PDF Search Completed</b>\nNo matches found for <code>{html.escape(', '.join(keywords_list))}</code> inside:\n{pdf_url}"
         )
         
     if os.path.exists(local_pdf):
