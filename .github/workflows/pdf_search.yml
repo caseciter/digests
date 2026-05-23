@@ -51,5 +51,3 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python search_pdf.py
-``` Ask me to edit or delete your scheduled action at any time.
-http://googleusercontent.com/task_confirmation_content/0
