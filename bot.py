@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Predefined keywords to show as quick-select options
 DEFAULT_KEYWORDS = ["insc", "scc", "fundamental", "religion"]
 
-# The core base domain path parsed from your custom system link
+# The core base domain path parsed from your system link
 BASE_URL_PREFIX = "https://cdn.sci-notifier.codechips.in/orders/"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -124,12 +124,10 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         # Save full link as runtime fallback for manual keyword typers
         context.user_data["last_link"] = text
         
-        # Compress the URL payload: Strip out the known base prefix to easily stay inside the 64-byte callback limit
-        # Example: 'https://cdn.sci-notifier.codechips.in/orders/2026-05-23/abc.pdf' becomes '2026-05-23/abc.pdf'
+        # Compress the URL payload: Strip out the known base prefix to stay inside the 64-byte callback limit
         short_url_path = text.replace(BASE_URL_PREFIX, "")
         
         for kw in DEFAULT_KEYWORDS:
-            # We pass both the keyword name and the specific short URL directly into the button data!
             keyboard.append([InlineKeyboardButton(text=kw.upper(), callback_data=f"k|{kw}|{short_url_path}")])
         
         keyboard.append([InlineKeyboardButton(text="🚨 SEARCH ALL KEYWORDS", callback_data=f"k|all|{short_url_path}")])
@@ -191,7 +189,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     application.add_handler(CallbackQueryHandler(handle_button_click))
 
-    logger.info("Zero-Memory Dependency Engine Active. Polling...")
+    logger.info("Memory-Independent Bot Engine Active. Polling...")
     application.run_polling()
 
 if __name__ == "__main__":
