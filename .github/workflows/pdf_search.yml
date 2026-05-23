@@ -1,6 +1,11 @@
 name: PDF Multi-Keyword Advanced Search
 
 on:
+  schedule:
+    # 13:45 UTC translates exactly to 7:15 PM IST every day
+    - cron: '45 13 * * *'
+    # 15:30 UTC translates exactly to 9:00 PM IST every day
+    - cron: '30 15 * * *'
   workflow_dispatch:
     inputs:
       pdf_url:
@@ -40,9 +45,11 @@ jobs:
 
     - name: Run Search Script
       env:
-        PDF_URL: ${{ github.event.inputs.pdf_url }}
-        KEYWORDS: ${{ github.event.inputs.keywords }}
-        MATCH_MODE: ${{ github.event.inputs.match_mode }}
+        PDF_URL: ${{ github.event.inputs.pdf_url || 'https://www.caseciter.com/content/files/2026/05/s.pdf' }}
+        KEYWORDS: ${{ github.event.inputs.keywords || 'scc, insc, fundamental, religion, the act, contend, surprise, shock, shock, social, unconstitutional, disturbing' }}
+        MATCH_MODE: ${{ github.event.inputs.match_mode || 'any' }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python search_pdf.py
+``` Ask me to edit or delete your scheduled action at any time.
+http://googleusercontent.com/task_confirmation_content/0
