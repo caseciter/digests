@@ -8,7 +8,7 @@ from pypdf import PdfReader
 
 # --- CONFIGURATION ---
 PDF_FILE_PATH = "document.pdf" 
-KEYWORDS_TO_TRACK = ["python", "automation", "telegram"]
+KEYWORDS_TO_TRACK = ["intentiion", "exculpatory", "Section"]
 
 # Read sensitive tokens from GitHub Secrets
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
