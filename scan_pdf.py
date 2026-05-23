@@ -7,7 +7,7 @@ from pypdf import PdfReader
 # --- CONFIGURATION ---
 # Just put the filename or the relative path to the PDF inside your repository
 PDF_FILE_PATH = "document.pdf" 
-KEYWORDS_TO_TRACK = ["python", "automation", "telegram"]
+KEYWORDS_TO_TRACK = ["insc", "criminal", "telegram"]
 
 # Read sensitive tokens from GitHub Secrets
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
