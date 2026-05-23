@@ -50,6 +50,9 @@ async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, p
         
         match_counter = 1
         found_any_match = False
+        
+        # We track groups of messages to display the "📦 Detailed Paragraphs (Part X):" header perfectly
+        current_part = 1 
 
         for page_num, page in enumerate(reader.pages, start=1):
             text = page.extract_text()
@@ -71,8 +74,16 @@ async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, p
                     found_any_match = True
                     found_kw_str = ", ".join(matched_keywords_in_para)
                     
-                    # Markdown blockquote style format (Precise Quote Visual Match)
+                    # Construct your group tracking header on intervals or right at the beginning of matches
+                    # We will output a new structural parts header block every 2 matches to match the screenshot pattern
+                    group_header = ""
+                    if match_counter == 1 or match_counter % 2 != 0:
+                        group_header = f"📦 *Detailed Paragraphs (Part {current_part}):*\n\n"
+                        current_part += 1
+                    
+                    # Precise visual markdown combination matching your requested layout
                     formatted_match = (
+                        f"{group_header}"
                         f"📄 *Context Match #{match_counter}*\n"
                         f"🔑 Keyword: {found_kw_str}\n"
                         f"> {para_clean}"
@@ -85,7 +96,7 @@ async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, p
                         except Exception:
                             pass
 
-                    # Send EACH match as its own separate message
+                    # Send EACH match dynamically as its own separate blockquoted message payload
                     await context.bot.send_message(chat_id=chat_id, text=formatted_match, parse_mode="Markdown")
                     match_counter += 1
 
