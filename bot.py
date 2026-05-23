@@ -5,7 +5,7 @@ from pypdf import PdfReader
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# Enable logging to track bot activity and errors
+# Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -14,23 +14,25 @@ logger = logging.getLogger(__name__)
 # Predefined keywords to show as quick-select options
 DEFAULT_KEYWORDS = ["insc", "scc", "fundamental", "religion"]
 
+# The core base domain path parsed from your custom system link
+BASE_URL_PREFIX = "https://cdn.sci-notifier.codechips.in/orders/"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Welcome! Send me a PDF link, then either click one of the keyword buttons (including 'ALL') or type your own keyword directly."
     )
 
 async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, pdf_url: str, target_keywords: list, status_msg_id: int = None) -> None:
-    # Build a clean display string of what we are searching for
     display_keywords = ", ".join([kw.upper() for kw in target_keywords])
     
-    # Update status or send a new one
+    # Send or edit status message
     if status_msg_id:
         try:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
                 text=f"⏳ Downloading and searching for '{display_keywords}'... Please wait.",
-                reply_markup=None  # Erase buttons immediately upon engagement
+                reply_markup=None  # Clears buttons immediately
             )
         except Exception:
             new_msg = await context.bot.send_message(chat_id=chat_id, text=f"⏳ Downloading and searching for '{display_keywords}'... Please wait.")
@@ -49,20 +51,17 @@ async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, p
         match_counter = 1
         found_any_match = False
 
-        # Parse page by page
         for page_num, page in enumerate(reader.pages, start=1):
             text = page.extract_text()
             if not text:
                 continue
                 
-            # Splitting text into separate paragraphs
             paragraphs = text.split("\n\n")
             for para in paragraphs:
                 para_clean = para.strip()
                 if not para_clean:
                     continue
                 
-                # Check if this paragraph contains any of our target keywords
                 matched_keywords_in_para = []
                 for kw in target_keywords:
                     if kw.lower() in para_clean.lower():
@@ -70,28 +69,26 @@ async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, p
 
                 if matched_keywords_in_para:
                     found_any_match = True
-                    # Format matching keywords string nicely for the block header
                     found_kw_str = ", ".join(matched_keywords_in_para)
                     
-                    # Construct individual, blockquoted message payload
+                    # Markdown blockquote style format (Precise Quote Visual Match)
                     formatted_match = (
                         f"📄 *Context Match #{match_counter}*\n"
                         f"🔑 Keyword: {found_kw_str}\n"
                         f"> {para_clean}"
                     )
                     
-                    # Delete the original operational status message right before sending the first match
+                    # Delete the "Please wait" status message right before sending results
                     if match_counter == 1:
                         try:
                             await context.bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
                         except Exception:
                             pass
 
-                    # Send EACH match as its own completely separate message
+                    # Send EACH match as its own separate message
                     await context.bot.send_message(chat_id=chat_id, text=formatted_match, parse_mode="Markdown")
                     match_counter += 1
 
-        # Handling scenarios where zero hits were encountered across pages
         if not found_any_match:
             try:
                 await context.bot.edit_message_text(
@@ -105,9 +102,9 @@ async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, p
     except Exception as e:
         logger.error(f"Error processing PDF: {e}")
         try:
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=status_msg_id, text="❌ Failed to complete the search. Verify the URL is valid.")
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=status_msg_id, text="❌ Failed to complete the search. Verify the PDF is accessible.")
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="❌ Failed to complete the search. Verify the URL is valid.")
+            await context.bot.send_message(chat_id=chat_id, text="❌ Failed to complete the search. Verify the PDF is accessible.")
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) < 2:
@@ -115,25 +112,29 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     pdf_url = context.args[0]
     keyword = " ".join(context.args[1:])
-    # Convert typed command keyword to single-item list
     await process_pdf_search(update.effective_chat.id, context, pdf_url, [keyword])
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
     
-    # Check if incoming text is a link
+    # If the user sends a link
     if text.startswith("http://") or text.startswith("https://"):
         keyboard = []
         
-        # Build keyword rows
-        for kw in DEFAULT_KEYWORDS:
-            keyboard.append([InlineKeyboardButton(text=kw.upper(), callback_data=f"kw|{kw}")])
+        # Save full link as runtime fallback for manual keyword typers
+        context.user_data["last_link"] = text
         
-        # Append "ALL" button at the very bottom as its own distinct action row
-        keyboard.append([InlineKeyboardButton(text="🚨 SEARCH ALL KEYWORDS", callback_data="kw|all_keywords")])
+        # Compress the URL payload: Strip out the known base prefix to easily stay inside the 64-byte callback limit
+        # Example: 'https://cdn.sci-notifier.codechips.in/orders/2026-05-23/abc.pdf' becomes '2026-05-23/abc.pdf'
+        short_url_path = text.replace(BASE_URL_PREFIX, "")
+        
+        for kw in DEFAULT_KEYWORDS:
+            # We pass both the keyword name and the specific short URL directly into the button data!
+            keyboard.append([InlineKeyboardButton(text=kw.upper(), callback_data=f"k|{kw}|{short_url_path}")])
+        
+        keyboard.append([InlineKeyboardButton(text="🚨 SEARCH ALL KEYWORDS", callback_data=f"k|all|{short_url_path}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        context.user_data["current_pdf_url"] = text
         
         await update.message.reply_text(
             "📋 I detected a PDF link! Select a keyword to search below:",
@@ -141,28 +142,29 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    # Treat text input as a direct keyword search if a link was stored previously
-    saved_url = context.user_data.get("current_pdf_url")
+    # Fallback context loop: User types a manual keyword directly into chat window right after dropping a link
+    saved_url = context.user_data.get("last_link")
     if saved_url:
         await process_pdf_search(update.effective_chat.id, context, saved_url, [text])
     else:
-        await update.message.reply_text("Please send a valid HTTP/HTTPS PDF link first.")
+        await update.message.reply_text("Please send a valid PDF link first.")
 
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
 
     data_parts = query.data.split("|")
-    if data_parts[0] == "kw":
+    if data_parts[0] == "k":
         action_keyword = data_parts[1]
-        pdf_url = context.user_data.get("current_pdf_url")
+        short_url_path = data_parts[2]
+        
+        # Reconstruct the absolute path instantly from the button data payload itself
+        if short_url_path.startswith("http"):
+            pdf_url = short_url_path
+        else:
+            pdf_url = BASE_URL_PREFIX + short_url_path
 
-        if not pdf_url:
-            await query.edit_message_text("❌ Session expired. Please paste the PDF link again.")
-            return
-
-        # Figure out if user clicked "ALL" or a specific keyword button
-        if action_keyword == "all_keywords":
+        if action_keyword == "all":
             target_list = DEFAULT_KEYWORDS
         else:
             target_list = [action_keyword]
@@ -179,18 +181,17 @@ def main() -> None:
     import os
     TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     if not TOKEN:
-        logger.error("No TELEGRAM_BOT_TOKEN environmental flag discovered.")
+        logger.error("No TELEGRAM_BOT_TOKEN found.")
         return
 
     application = Application.builder().token(TOKEN).build()
 
-    # Context Routers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     application.add_handler(CallbackQueryHandler(handle_button_click))
 
-    logger.info("Bot engine online. Initiating polling loop...")
+    logger.info("Zero-Memory Dependency Engine Active. Polling...")
     application.run_polling()
 
 if __name__ == "__main__":
