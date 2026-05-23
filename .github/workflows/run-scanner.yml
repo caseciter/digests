@@ -1,0 +1,37 @@
+name: Scan PDF and Alert Telegram
+
+on:
+  # Allows you to click a button in GitHub to run it manually anytime
+  workflow_dispatch:
+  
+  # Runs automatically on a schedule (e.g., every day at 9:00 AM UTC)
+  schedule:
+    - cron: '0 9 * * *'
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Downloads a copy of your repo code onto the GitHub runner machine
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+
+    # 2. Sets up Python on the runner machine
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # 3. Installs dependencies
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pypdf
+
+    # 4. Executes the script while feeding it your repository secrets securely
+    - name: Run Script
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python scan_pdf.py
