@@ -1,14 +1,3 @@
-Ah, the message got cut off mid-sentence because Telegram enforces a strict limit of **4,096 characters per message**. When your PDF has a lot of matches or very long paragraphs, all those blocks combined easily break that limit, causing the script to chop the text off.
-
-To fix this, we need to change how the script sends messages: instead of stuffing everything into one giant text block, the script should **send each block as its own individual message**.
-
-This completely eliminates the truncation issue, group-organizes the alerts, and ensures you get every single match clearly without data getting dropped.
-
-### The Fixed Python Script (`scan_pdf.py`)
-
-Replace your current script with this version. It now calculates length safely and fires multiple separate messages to your bot if needed:
-
-```python
 import os
 import re
 import sys
@@ -144,10 +133,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An error execution occurred: {e}")
         sys.exit(1)
-
-```
-
-### What makes this fix work:
-
-* **Message Splitting:** Instead of combining all paragraphs together into one 5,000+ character brick, it sends one tidy "Summary" message first. Then, it runs a loop to dispatch each individual text match separately (`Context Match #1`, `Context Match #2`, etc.).
-* **Rate-Limit Guard:** It includes a half-second pause (`time.sleep(0.5)`) between messages so Telegram doesn't flag your bot for spamming text too quickly.
