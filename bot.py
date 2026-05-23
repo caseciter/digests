@@ -21,11 +21,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "2. Type: `/search <PDF_URL> <KEYWORD>`"
     )
 
-# Core logic to download and search the PDF
-async def process_pdf_search(update: Update, context: ContextTypes.DEFAULT_TYPE, pdf_url: str, keyword: str, status_msg=None) -> None:
-    # Send a fresh status message if one wasn't passed from the button click
-    if not status_msg:
-        status_msg = await update.message.reply_text(f"⏳ Downloading and searching for '{keyword}'... Please wait.")
+async def process_pdf_search(chat_id: int, context: ContextTypes.DEFAULT_TYPE, pdf_url: str, keyword: str, status_msg_id: int = None) -> None:
+    # Send an initial message if we don't have one to edit
+    if status_msg_id:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status_msg_id,
+            text=f"⏳ Downloading and searching for '{keyword}'... Please wait."
+        )
+    else:
+        new_msg = await context.bot.send_message(chat_id=chat_id, text=f"⏳ Downloading and searching for '{keyword}'... Please wait.")
+        status_msg_id = new_msg.message_id
     
     keyword = keyword.lower()
 
@@ -53,26 +59,32 @@ async def process_pdf_search(update: Update, context: ContextTypes.DEFAULT_TYPE,
             if len(output) > 4000:
                 output = output[:4000] + "\n\n...(truncated due to length limit)"
             
-            # Delete the status message and send the markdown payload cleanly
-            await status_msg.delete()
-            await context.bot.send_message(chat_id=status_msg.chat_id, text=output, parse_mode="Markdown")
+            # Delete status message and reply with the final text cleanly
+            await context.bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
+            await context.bot.send_message(chat_id=chat_id, text=output, parse_mode="Markdown")
         else:
-            await status_msg.edit_text(f"🔍 Finished searching. Keyword '{keyword}' not found in the text.")
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg_id,
+                text=f"🔍 Finished searching. Keyword '{keyword}' not found in the text."
+            )
 
     except Exception as e:
         logger.error(f"Error processing PDF: {e}")
-        await status_msg.edit_text("❌ Failed to complete the search. Verify the URL is a direct path to a valid PDF.")
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status_msg_id,
+            text="❌ Failed to complete the search. Verify the URL is a direct path to a valid PDF."
+        )
 
-# Handle explicitly typed command: /search URL keyword
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) < 2:
         await update.message.reply_text("❌ Missing arguments. Use: `/search <url> <keyword>`")
         return
     pdf_url = context.args[0]
     keyword = " ".join(context.args[1:])
-    await process_pdf_search(update, context, pdf_url, keyword)
+    await process_pdf_search(update.effective_chat.id, context, pdf_url, keyword)
 
-# Handle a raw text link sent without a command
 async def handle_raw_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
     
@@ -82,6 +94,8 @@ async def handle_raw_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             keyboard.append([InlineKeyboardButton(text=kw.upper(), callback_data=f"kw|{kw}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Save URL per user session data
         context.user_data["current_pdf_url"] = text
         
         await update.message.reply_text(
@@ -91,10 +105,9 @@ async def handle_raw_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     else:
         await update.message.reply_text("Please send a valid HTTP/HTTPS link to a PDF document.")
 
-# Handle button interactions
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()  # Tell Telegram the click was registered immediately
+    await query.answer()
 
     data_parts = query.data.split("|")
     if data_parts[0] == "kw":
@@ -102,17 +115,17 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         pdf_url = context.user_data.get("current_pdf_url")
 
         if not pdf_url:
-            await query.edit_message_text("❌ Session expired. Please paste the PDF link again.")
+            await query.edit_message_text("❌ Session expired or link missing. Please paste the PDF link again.")
             return
 
-        # CRITICAL FIX: Erase the buttons and alter text to state progress to avoid UI lock
-        status_msg = await query.edit_message_text(
-            text=f"⏳ Downloading and searching for '{selected_keyword}'... Please wait.", 
-            reply_markup=None  # This explicitly deletes the keyboard block
+        # Pass execution details forward
+        await process_pdf_search(
+            chat_id=query.message.chat_id,
+            context=context,
+            pdf_url=pdf_url,
+            keyword=selected_keyword,
+            status_msg_id=query.message.message_id
         )
-
-        # Execute search passing the clean status message handle
-        await process_pdf_search(update, context, pdf_url, selected_keyword, status_msg=status_msg)
 
 def main() -> None:
     import os
@@ -125,10 +138,10 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("search", search_command))
-    application.add_handler(filters.TEXT & ~filters.COMMAND, handle_raw_link))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_raw_link))
     application.add_handler(CallbackQueryHandler(handle_button_click))
 
-    logger.info("Bot is polling with fixed keyboard execution...")
+    logger.info("Bot is polling cleanly...")
     application.run_polling()
 
 if __name__ == "__main__":
