@@ -15,7 +15,7 @@ on:
       keywords:
         description: 'Keywords to search for (separate with commas)'
         required: true
-        default: 'scc, insc, fundamental, religion, contend, surprise, shock, social, unconstitutional, disturbing'
+        default: 'scc, insc, fundamental, religion, the act, contend, surprise, shock, shock, social, unconstitutional, disturbing'
       match_mode:
         description: 'Matching Rule Strategy'
         required: true
