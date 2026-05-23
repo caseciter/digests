@@ -5,20 +5,45 @@ import urllib.parse
 import requests
 import pypdf
 
-def send_telegram_message(token, chat_id, text):
-    """Sends a text message to a Telegram chat."""
+def send_telegram_messages_in_chunks(token, chat_id, header, matches):
+    """
+    Groups matched paragraphs into multiple messages to respect Telegram's 4096 character limit,
+    then sends them consecutively.
+    """
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     
-    if len(text) > 4000:
-        text = text[:4000] + "\n... (Truncated)"
+    current_message = header
+    message_count = 1
+    
+    for match in matches:
+        # Format the block with a separator
+        block = f"\n\n---\n\n{match}"
         
+        # Check if adding this block exceeds a safe limit (e.g., 4000 chars)
+        if len(current_message) + len(block) > 4000:
+            print(f"Sending message chunk #{message_count}...")
+            _post_to_telegram(url, chat_id, current_message)
+            
+            # Start a new message chunk
+            message_count += 1
+            current_message = f"📦 *[Part {message_count}]*\n{match}"
+        else:
+            current_message += block
+            
+    # Send any remaining content left in the buffer
+    if current_message:
+        print(f"Sending final message chunk #{message_count}...")
+        _post_to_telegram(url, chat_id, current_message)
+
+def _post_to_telegram(url, chat_id, text):
+    """Helper tool to make the actual network request to Telegram."""
     data = urllib.parse.urlencode({'chat_id': chat_id, 'text': text}).encode('utf-8')
     try:
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req) as response:
             return response.read().decode('utf-8')
     except Exception as e:
-        print(f"Error sending to Telegram: {e}")
+        print(f"Error sending message chunk to Telegram: {e}")
         return None
 
 def extract_paragraphs_with_keywords(pdf_path, keywords_list, match_mode):
@@ -46,11 +71,9 @@ def extract_paragraphs_with_keywords(pdf_path, keywords_list, match_mode):
                 # Determine if it meets our matching strategy rule
                 should_append = False
                 if match_mode == "all":
-                    # EVERY keyword must be present
                     if len(caught_keywords) == len(keywords_list):
                         should_append = True
                 else:
-                    # AT LEAST ONE keyword must be present
                     if len(caught_keywords) > 0:
                         should_append = True
                 
@@ -105,11 +128,11 @@ def main():
     matches = extract_paragraphs_with_keywords(local_pdf, keywords_list, match_mode)
     
     if matches:
-        print(f"Found {len(matches)} match(es). Sending to Telegram...")
+        print(f"Found {len(matches)} match(es). Dispatching split chunks to Telegram...")
         keywords_display = ", ".join(keywords_list)
-        header = f"🔔 *Keyword Matches Found ({match_mode.upper()})* 🔔\nURL: {pdf_url}\nTargets: {keywords_display}\n\n"
-        full_message = header + "\n\n---\n\n".join(matches)
-        send_telegram_message(tg_token, tg_chat_id, full_message)
+        header = f"🔔 *Keyword Matches Found ({match_mode.upper()})* 🔔\nURL: {pdf_url}\nTargets: {keywords_display}"
+        
+        send_telegram_messages_in_chunks(tg_token, tg_chat_id, header, matches)
     else:
         print("No matching paragraphs found based on your keyword criteria.")
         
