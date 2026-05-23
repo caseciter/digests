@@ -6,7 +6,7 @@ on:
       pdf_url:
         description: 'Direct Link to the PDF'
         required: true
-        default: 'https://example.com/document.pdf'
+        default: 'https://www.caseciter.com/content/files/2026/05/s.pdf'
       keywords:
         description: 'Keywords to search for (separate with commas)'
         required: true
