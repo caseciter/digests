@@ -2,13 +2,13 @@ import os
 import re
 import urllib.request
 import urllib.parse
+import requests
 import pypdf
 
 def send_telegram_message(token, chat_id, text):
     """Sends a text message to a Telegram chat."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     
-    # Truncate message if it exceeds Telegram's limit (4096 characters)
     if len(text) > 4000:
         text = text[:4000] + "\n... (Truncated)"
         
@@ -32,15 +32,12 @@ def extract_paragraphs_with_keyword(pdf_path, keyword):
             if not text:
                 continue
             
-            # Split text by double newlines or standard line breaks that look like paragraph endings
-            # Adjust splitting logic depending on the structural layout of your target PDFs
+            # Split text by paragraph line breaks
             paragraphs = re.split(r'\n\s*\n', text)
             
             for para in paragraphs:
                 cleaned_para = para.strip()
-                # Case-insensitive keyword matching
                 if keyword.lower() in cleaned_para.lower():
-                    # Format found context with page number reference
                     matched_paragraphs.append(f"[Page {page_num}]\n{cleaned_para}")
                     
     except Exception as e:
@@ -49,7 +46,6 @@ def extract_paragraphs_with_keyword(pdf_path, keyword):
     return matched_paragraphs
 
 def main():
-    # Fetch configurations from Environment Variables
     pdf_url = os.environ.get("PDF_URL")
     keyword = os.environ.get("KEYWORD")
     tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -61,9 +57,20 @@ def main():
 
     local_pdf = "temp_downloaded.pdf"
     
+    # Masquerade as a real desktop web browser to bypass anti-bot blocks
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,application/pdf,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5"
+    }
+    
     print(f"Downloading PDF from: {pdf_url}")
     try:
-        urllib.request.urlretrieve(pdf_url, local_pdf)
+        with requests.get(pdf_url, headers=headers, stream=True) as response:
+            response.raise_for_status() # Raises an error if the site rejects the request
+            with open(local_pdf, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
     except Exception as e:
         print(f"Failed to download PDF: {e}")
         return
@@ -79,7 +86,6 @@ def main():
     else:
         print("No matching paragraphs found.")
         
-    # Clean up the downloaded file
     if os.path.exists(local_pdf):
         os.remove(local_pdf)
 
