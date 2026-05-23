@@ -21,8 +21,8 @@ def send_telegram_message(token, chat_id, text):
         print(f"Error sending to Telegram: {e}")
         return None
 
-def extract_paragraphs_with_keyword(pdf_path, keyword):
-    """Extracts paragraphs containing the specified keyword from the PDF."""
+def extract_paragraphs_with_keywords(pdf_path, keywords_list, match_mode):
+    """Extracts paragraphs matching keywords based on the selected mode ('any' or 'all')."""
     matched_paragraphs = []
     
     try:
@@ -32,13 +32,33 @@ def extract_paragraphs_with_keyword(pdf_path, keyword):
             if not text:
                 continue
             
-            # Split text by paragraph line breaks
+            # Split text into paragraphs based on blank lines
             paragraphs = re.split(r'\n\s*\n', text)
             
             for para in paragraphs:
                 cleaned_para = para.strip()
-                if keyword.lower() in cleaned_para.lower():
-                    matched_paragraphs.append(f"[Page {page_num}]\n{cleaned_para}")
+                if not cleaned_para:
+                    continue
+                
+                # Check which keywords match this specific paragraph
+                caught_keywords = [kw for kw in keywords_list if kw.lower() in cleaned_para.lower()]
+                
+                # Determine if it meets our matching strategy rule
+                should_append = False
+                if match_mode == "all":
+                    # EVERY keyword must be present
+                    if len(caught_keywords) == len(keywords_list):
+                        should_append = True
+                else:
+                    # AT LEAST ONE keyword must be present
+                    if len(caught_keywords) > 0:
+                        should_append = True
+                
+                if should_append:
+                    triggered_str = ", ".join(caught_keywords)
+                    matched_paragraphs.append(
+                        f"[Page {page_num} | Matches: {triggered_str}]\n{cleaned_para}"
+                    )
                     
     except Exception as e:
         print(f"Error processing PDF file: {e}")
@@ -47,17 +67,23 @@ def extract_paragraphs_with_keyword(pdf_path, keyword):
 
 def main():
     pdf_url = os.environ.get("PDF_URL")
-    keyword = os.environ.get("KEYWORD")
+    keywords_raw = os.environ.get("KEYWORDS")
+    match_mode = os.environ.get("MATCH_MODE", "any").strip().lower()
     tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     tg_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     
-    if not all([pdf_url, keyword, tg_token, tg_chat_id]):
+    if not all([pdf_url, keywords_raw, tg_token, tg_chat_id]):
         print("Missing required environment variables.")
+        return
+
+    # Turn comma-separated string into a clean list of phrases
+    keywords_list = [kw.strip() for kw in keywords_raw.split(",") if kw.strip()]
+    if not keywords_list:
+        print("No valid keywords found to search.")
         return
 
     local_pdf = "temp_downloaded.pdf"
     
-    # Masquerade as a real desktop web browser to bypass anti-bot blocks
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,application/pdf,*/*;q=0.8",
@@ -67,7 +93,7 @@ def main():
     print(f"Downloading PDF from: {pdf_url}")
     try:
         with requests.get(pdf_url, headers=headers, stream=True) as response:
-            response.raise_for_status() # Raises an error if the site rejects the request
+            response.raise_for_status()
             with open(local_pdf, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
@@ -75,16 +101,17 @@ def main():
         print(f"Failed to download PDF: {e}")
         return
 
-    print(f"Searching for keyword: '{keyword}'")
-    matches = extract_paragraphs_with_keyword(local_pdf, keyword)
+    print(f"Searching mode: '{match_mode.upper()}' for keywords: {keywords_list}")
+    matches = extract_paragraphs_with_keywords(local_pdf, keywords_list, match_mode)
     
     if matches:
         print(f"Found {len(matches)} match(es). Sending to Telegram...")
-        header = f"🔔 *Keyword Match Found* 🔔\nURL: {pdf_url}\nKeyword: '{keyword}'\n\n"
+        keywords_display = ", ".join(keywords_list)
+        header = f"🔔 *Keyword Matches Found ({match_mode.upper()})* 🔔\nURL: {pdf_url}\nTargets: {keywords_display}\n\n"
         full_message = header + "\n\n---\n\n".join(matches)
         send_telegram_message(tg_token, tg_chat_id, full_message)
     else:
-        print("No matching paragraphs found.")
+        print("No matching paragraphs found based on your keyword criteria.")
         
     if os.path.exists(local_pdf):
         os.remove(local_pdf)
