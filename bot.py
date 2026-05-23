@@ -142,4 +142,56 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     # Treat text input as a direct keyword search if a link was stored previously
-    saved_url = context.user_data.
+    saved_url = context.user_data.get("current_pdf_url")
+    if saved_url:
+        await process_pdf_search(update.effective_chat.id, context, saved_url, [text])
+    else:
+        await update.message.reply_text("Please send a valid HTTP/HTTPS PDF link first.")
+
+async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data_parts = query.data.split("|")
+    if data_parts[0] == "kw":
+        action_keyword = data_parts[1]
+        pdf_url = context.user_data.get("current_pdf_url")
+
+        if not pdf_url:
+            await query.edit_message_text("❌ Session expired. Please paste the PDF link again.")
+            return
+
+        # Figure out if user clicked "ALL" or a specific keyword button
+        if action_keyword == "all_keywords":
+            target_list = DEFAULT_KEYWORDS
+        else:
+            target_list = [action_keyword]
+
+        await process_pdf_search(
+            chat_id=query.message.chat_id,
+            context=context,
+            pdf_url=pdf_url,
+            target_keywords=target_list,
+            status_msg_id=query.message.message_id
+        )
+
+def main() -> None:
+    import os
+    TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not TOKEN:
+        logger.error("No TELEGRAM_BOT_TOKEN environmental flag discovered.")
+        return
+
+    application = Application.builder().token(TOKEN).build()
+
+    # Context Routers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("search", search_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+    application.add_handler(CallbackQueryHandler(handle_button_click))
+
+    logger.info("Bot engine online. Initiating polling loop...")
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
